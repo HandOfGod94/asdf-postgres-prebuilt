@@ -11,10 +11,12 @@ Postgresql plugin for [asdf](https://github.com/asdf-vm/asdf) version manager
 - uuid
 - icu-devtools (linux) or icu4c (MacOS)
 
-_This assumes macOS, a Debian-flavored linux, or a SUSE-flavored linux.  If you
+_This assumes macOS, a Debian-flavored linux.  If you
 need it to work on something else, you may need to modify the plugin. You'll
 need the dependencies referenced in the list above installed via whatever method
 you prefer. There are some suggestions below._
+
+Note: This plugin has been tested only on macOS and Debian. Other operating systems have not been tested.
 
 ### Mac
 
@@ -67,54 +69,49 @@ sudo zypper in openssl-devel readline-devel zlib-devel libcurl-devel uuid-devel 
 
 ## Install
 
+1. Add the plugin:
+
+   ```sh
+   asdf plugin add https://github.com/HandOfGod94/asdf-postgres-prebuilt.git
+   ```
+
+2. In your project's `.tool-versions` file, add the desired Postgres version using this plugin name:
+
+   ```
+   postgres-prebuilt 17.4.0
+   ```
+
+3. Install via asdf:
+
+   ```sh
+   asdf install
+   ```
+
+## Post-installation
+
+To start a new database, you must provide a data directory when starting Postgres:
+
 ```sh
-asdf plugin-add postgres
+pg_ctl start -D /path/to/your/data
 ```
-
-## ASDF options
-
-Check [asdf](https://github.com/asdf-vm/asdf) readme for instructions on how to
-install & manage versions of Postgres.
-
-When installing Postgres using `asdf install`, you can pass custom configure
-options with the following env vars:
-
-- `POSTGRES_CONFIGURE_OPTIONS` - use only your configure options
-- `POSTGRES_EXTRA_CONFIGURE_OPTIONS` - append these configure options along with
-  ones that this plugin already uses (curl, openssl, readline, zlib, uuid)
-
-These options can be passed at runtime, or set in
-`~/.asdf-postgres-configure-options`. This file will be sourced at `asdf
-install` time if it exists.
-
-For example, if you want to compile with a specific set of openssl libraries,
-you might do something like `POSTGRES_EXTRA_CONFIGURE_OPTIONS="--with-uuid=e2fs
---with-openssl --with-libraries=/usr/local/lib:/usr/local/opt/openssl@1.1/lib
---with-includes=/usr/local/include:/usr/local/opt/openssl@1.1/include" asdf
-install postgres`
-
-The option `POSTGRES_SKIP_INITDB` can be used to skip `initdb` command which is
-not allowed to run from `root` account. `POSTGRES_SKIP_INITDB asdf install 
-postgres 17.4` for example.
-
-if you intend to use 
-[ephemeral postgres](https://github.com/smashedtoatoms/asdf-ephemeral-pg), 
-you'll want to install postgres via `POSTGRES_SKIP_INITDB asdf install postgres
-17.4` for example, and then run `pg_ctl start` and `createdb <your local 
-username>`.  That will get you very close to the default install config for 
-postgres, which will behave with ephemeral-pg
 
 # How to use (easier version)
 
 ## Install
 
-1. Create your .tool-versions file in the project that needs postgres and add
-   `postgres 9.4.7` or whatever version that you want.
-2. run `asdf install`
+1. Add the plugin:
+
+   ```sh
+   asdf plugin add https://github.com/HandOfGod94/asdf-postgres-prebuilt.git
+   ```
+
+2. Create your `.tool-versions` file in the project that needs Postgres and add:
+   `postgres-prebuilt 17.4.0`
+3. Run `asdf install`
 
 ## Run
 
-1. Once it is done, run `pg_ctl start`
+1. Once it is done, run `pg_ctl start -D /path/to/your/data`
 2. Once that starts, run `createdb default` _you can sub `default` with whatever
    you want your db name to be._
 3. Then log in with `psql -d default` _if you didn't use default, make sure you
@@ -130,3 +127,7 @@ postgres, which will behave with ephemeral-pg
 
 1. Just run `pg_ctl stop` if you moved your data directory, you have to do
    `pg_ctl -D wherever/you/moved/it stop`
+
+## Credits
+
+Thanks to [theseus-rs/postgresql-binaries](https://github.com/theseus-rs/postgresql-binaries) for providing awesome PostgreSQL binaries.
