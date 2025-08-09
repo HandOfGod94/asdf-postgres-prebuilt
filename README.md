@@ -23,6 +23,26 @@ you prefer. There are some suggestions below._
 
 Note: This plugin has been tested only on macOS and Debian. Other operating systems have not been tested.
 
+## Install
+
+1. Add the plugin:
+
+   ```sh
+   asdf plugin add https://github.com/HandOfGod94/asdf-postgres-prebuilt.git
+   ```
+
+2. In your project's `.tool-versions` file, add the desired Postgres version using this plugin name:
+
+   ```
+   postgres-prebuilt 17.4.0
+   ```
+
+3. Install via asdf:
+
+   ```sh
+   asdf install
+   ```
+
 ### Mac
 
 ```sh
