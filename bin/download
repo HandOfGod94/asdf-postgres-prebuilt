@@ -2,40 +2,186 @@
 
 set -euo pipefail
 
-download_source() {
-  local install_type=$1
-  local version=$2
-  local release_file=$3
-  local download_url
-  download_url=$(get_download_url "$install_type" "$version")
-
-  curl -Lo "$release_file" -C - "$download_url"
+# Utility functions
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
 }
 
-get_download_file_path() {
-  local install_type=$1
-  local version=$2
-  local download_path=$3
-  local pkg_name="$download_path/postgresql-${version}.tar.gz"
-
-  echo "$pkg_name"
+log() {
+  echo "INFO: $*" >&2
 }
 
-get_download_url() {
-  local install_type=$1
-  local version=$2
-  echo "https://ftp.postgresql.org/pub/source/v${version}/postgresql-${version}.tar.gz"
+# Normalize a PostgreSQL version to semver with patch segment
+# Examples: 16 -> 16.0.0, 16.9 -> 16.9.0, 16.9.0 -> 16.9.0
+normalize_version() {
+  local v=$1
+  if [[ "$v" =~ ^[0-9]+$ ]]; then
+    echo "${v}.0.0"
+  elif [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "${v}.0"
+  else
+    echo "$v"
+  fi
 }
 
-mkdir -p "$ASDF_DOWNLOAD_PATH"
+major_series() {
+  local v=$1
+  if [[ "$v" =~ ^9\. ]]; then
+    # Keep 9.x as two-part series (e.g., 9.6)
+    echo "$v" | awk -F. '{print $1"."$2}'
+  else
+    echo "$v" | awk -F. '{print $1}'
+  fi
+}
 
-release_file=$(get_download_file_path "$ASDF_INSTALL_TYPE" "$ASDF_INSTALL_VERSION" "$ASDF_DOWNLOAD_PATH")
+detect_os() {
+  local os_name
+  os_name=$(uname -s)
+  
+  case "$os_name" in
+    Linux)
+      if [[ -f /etc/debian_version ]]; then
+        echo "debian"
+      elif [[ -f /etc/redhat-release ]]; then
+        echo "redhat"
+      else
+        echo "linux"
+      fi
+      ;;
+    Darwin)
+      echo "macos"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
 
-# Download tar.gz file to the download directory
-download_source "$ASDF_INSTALL_TYPE" "$ASDF_INSTALL_VERSION" "$release_file"
+detect_arch() {
+  local arch
+  arch=$(uname -m)
+  
+  case "$arch" in
+    x86_64|amd64)
+      echo "amd64"
+      ;;
+    aarch64|arm64)
+      echo "arm64"
+      ;;
+    *)
+      echo "$arch"
+      ;;
+  esac
+}
 
-# Extract contents of tar.gz file into the download directory
-tar -xzf "$release_file" -C "$ASDF_DOWNLOAD_PATH" --strip-components=1 || fail "Could not extract $release_file"
+get_debian_codename() {
+  if command -v lsb_release >/dev/null 2>&1; then
+    lsb_release -cs
+  elif [[ -f /etc/os-release ]]; then
+    . /etc/os-release
+    echo "$VERSION_CODENAME"
+  else
+    echo "bullseye"  # Default fallback
+  fi
+}
 
-# Remove the tar.gz file since we don't need to keep it
-rm "$release_file"
+download_theseus() {
+  local version=$1
+  local download_path=$2
+  local os
+  local arch
+  local norm_version
+  local series
+  local triple
+  local filename
+  local base_url
+
+  os=$(detect_os)
+  arch=$(detect_arch)
+  norm_version=$(normalize_version "$version")
+  series=$(major_series "$version")
+
+  # Map OS/arch to theseus target triples
+  case "$os" in
+    macos)
+      case "$arch" in
+        arm64) triple="aarch64-apple-darwin" ;;
+        amd64) triple="x86_64-apple-darwin" ;;
+        *) fail "Unsupported macOS architecture: $arch" ;;
+      esac
+      ;;
+    debian|linux)
+      case "$arch" in
+        arm64) triple="aarch64-unknown-linux-gnu" ;;
+        amd64) triple="x86_64-unknown-linux-gnu" ;;
+        *) fail "Unsupported Linux architecture: $arch" ;;
+      esac
+      ;;
+    *)
+      fail "Unsupported operating system for theseus binaries: $os"
+      ;;
+  esac
+
+  filename="postgresql-${norm_version}-${triple}.tar.gz"
+  base_url="https://github.com/theseus-rs/postgresql-binaries/releases/download/${norm_version}/${filename}"
+
+  log "Using theseus prebuilt binaries: version=${norm_version} series=${series} os=${os} arch=${arch} triple=${triple}"
+  log "Downloading: $base_url"
+
+  mkdir -p "$download_path"
+
+  # Download tarball and checksum
+  curl -fsSL "$base_url" -o "${download_path}/${filename}" || \
+    fail "Failed to download ${filename} from ${base_url}"
+
+  if curl -fsSL "${base_url}.sha256" -o "${download_path}/${filename}.sha256"; then
+    (cd "$download_path" && shasum -a 256 -c "${filename}.sha256") || \
+      fail "Checksum verification failed for ${filename}"
+  else
+    log "Checksum file not found; skipping verification"
+  fi
+
+  # Extract tarball into download path (as per asdf download contract)
+  tar -xzf "${download_path}/${filename}" -C "$download_path" || \
+    fail "Could not extract ${filename}"
+
+  # Remove archive to keep only extracted contents
+  rm -f "${download_path}/${filename}" "${download_path}/${filename}.sha256" 2>/dev/null || true
+}
+
+# Main download logic
+main() {
+  local install_type="$ASDF_INSTALL_TYPE"
+  local version="$ASDF_INSTALL_VERSION"
+  local download_path="$ASDF_DOWNLOAD_PATH"
+  local os
+  
+  # Validate inputs
+  [[ "$install_type" == "version" ]] || fail "Only version installs are supported (not ref installs)"
+  [[ -n "$version" ]] || fail "Version not specified"
+  [[ -n "$download_path" ]] || fail "Download path not specified"
+  
+  # Create download directory
+  mkdir -p "$download_path"
+  
+  # Detect operating system
+  os=$(detect_os)
+  log "Detected OS: $os"
+  log "PostgreSQL version: $version"
+  log "Download path: $download_path"
+  
+  case "$os" in
+    debian|macos)
+      download_theseus "$version" "$download_path"
+      ;;
+    *)
+      fail "Unsupported operating system: $os. Only Debian/Ubuntu and macOS are supported."
+      ;;
+  esac
+  
+  log "Download completed successfully"
+}
+
+# Run main function
+main
