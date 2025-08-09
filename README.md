@@ -1,6 +1,11 @@
-# asdf-postgres ![Build](https://github.com/smashedtoatoms/asdf-postgres/workflows/Build/badge.svg?branch=master)
+# asdf-postgres-prebuilt
 
-Postgresql plugin for [asdf](https://github.com/asdf-vm/asdf) version manager
+Postgresql plugin for [asdf](https://github.com/asdf-vm/asdf) version manager, using
+prebuilt binaries.
+
+## Why prebuilt binaries?
+Configuring from source is tedious and time consuming, esp. for few of my docker builds
+This is to fasten those things.
 
 ## Dependencies
 
