@@ -4,6 +4,7 @@ PGDATA=${PGDATA:-}
 PGHOST=${PGHOST:-}
 PGPORT=${PGPORT:-}
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+DYLD_LIBRARY_PATH=${DYLD_LIBRARY_PATH:-}
 
 if [ "$PGDATA" = "" ]; then
   export PGDATA="$ASDF_INSTALL_PATH/data"
@@ -11,8 +12,18 @@ else
   export PGDATA="$PGDATA"
 fi
 
+# Linux dynamic libraries
 if [ "$LD_LIBRARY_PATH" = "" ]; then
   export LD_LIBRARY_PATH="$ASDF_INSTALL_PATH/lib"
 else
   export LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+fi
+
+# macOS dynamic libraries
+if [ "$(uname)" = "Darwin" ]; then
+  if [ "$DYLD_LIBRARY_PATH" = "" ]; then
+    export DYLD_LIBRARY_PATH="$ASDF_INSTALL_PATH/lib"
+  else
+    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH"
+  fi
 fi

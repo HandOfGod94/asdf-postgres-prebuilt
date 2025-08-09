@@ -1,104 +1,84 @@
 #!/usr/bin/env bash
 
-install_postgres() {
+set -euo pipefail
+
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+log() {
+  echo "INFO: $*" >&2
+}
+
+find_extracted_src_dir() {
+  local download_path=$1
+  local candidate
+
+  # Prefer directories that contain bin/initdb
+  for candidate in "$download_path"/*; do
+    if [[ -d "$candidate" && -x "$candidate/bin/initdb" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  # Fallback: first directory
+  candidate=$(find "$download_path" -mindepth 1 -maxdepth 1 -type d | head -n1 || true)
+  if [[ -n "${candidate}" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+copy_tree() {
+  local src=$1
+  local dst=$2
+
+  mkdir -p "$dst"
+  # Prefer rsync if available for robustness; otherwise cp -a
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a "$src/" "$dst/"
+  else
+    # shellcheck disable=SC2174
+    cp -a "$src/." "$dst/"
+  fi
+}
+
+install_prebuilt() {
   local install_type=$1
   local version=$2
   local install_path=$3
+  local download_path=${ASDF_DOWNLOAD_PATH:?ASDF_DOWNLOAD_PATH not set}
 
-  # running this in a subshell
-  # because we don't want to disturb current working dir
-  (
-    cd "$ASDF_DOWNLOAD_PATH"
+  log "Installing PostgreSQL ${version} from prebuilt binaries"
+  log "Download path: ${download_path}"
+  log "Install path: ${install_path}"
 
-    prepare $version
+  # Find extracted source directory (created by bin/download)
+  local src_dir
+  src_dir=$(find_extracted_src_dir "$download_path") || fail "Could not locate extracted PostgreSQL directory in ${download_path}"
 
-    local configure_options="$(construct_configure_options)"
+  log "Using extracted directory: ${src_dir}"
 
-    echo "Building with options: $configure_options"
-    ./configure $configure_options || exit 1
-    make || exit 1
-    make install || exit 1
-    cd contrib || exit 1
-    make || exit 1
-    make install || exit 1
-    mkdir $install_path/data || exit 1
-    if [ "$POSTGRES_SKIP_INITDB" = "" ]; then
-      $install_path/bin/initdb -D $install_path/data -U postgres || exit 1
-    fi
-  )
-}
+  # Copy files into install path
+  copy_tree "$src_dir" "$install_path"
 
-prepare() {
-  local version=$1
-  local minor=${version%.*}
-  local major=${minor%.*}
-  local minor_integer=$(awk -v x=$minor 'BEGIN{print x*100}')
-  local icu_uconv=$(uconv -V)
-  local icu_version=${icu_uconv##*ICU }
-  local icu_version_major=${icu_version%.*}
+  # Ensure data directory exists
+  mkdir -p "$install_path/data"
 
-  if [ "$(uname)" == "Linux" ] && [ "$icu_version_major" -eq 68 ] && [ "$major" -ge 11 ]; then
-    cd src || exit
-    git apply $HOME/.asdf/plugins/postgres/lib/icu68.patch
-    cd ..
-  fi
-
-  if [ "$(uname)" == "Darwin" ] && [ "$minor_integer" -ge '840' ] && [ "$minor_integer" -le "930" ]; then
-    cd contrib || exit
-    git apply $HOME/.asdf/plugins/postgres/lib/uuid-ossp.patch
-    cd ..
-  fi
-}
-
-construct_configure_options() {
-  load_configure_options
-
-  if [ "$POSTGRES_CONFIGURE_OPTIONS" = "" ]; then
-    local configure_options="--prefix=$install_path \
-    --with-uuid=e2fs \
-    --with-openssl \
-    --with-zlib \
-    $(lib_include_paths)"
-
-    if [ "$POSTGRES_EXTRA_CONFIGURE_OPTIONS" != "" ]; then
-      configure_options="$configure_options $POSTGRES_EXTRA_CONFIGURE_OPTIONS"
+  # Initialize database unless skipped
+  if [[ -z "${POSTGRES_SKIP_INITDB:-}" ]]; then
+    if [[ -x "$install_path/bin/initdb" ]]; then
+      "$install_path/bin/initdb" -D "$install_path/data" -U postgres || fail "initdb failed"
+    else
+      fail "initdb not found at $install_path/bin/initdb"
     fi
   else
-    local configure_options="$POSTGRES_CONFIGURE_OPTIONS --prefix=$install_path"
+    log "POSTGRES_SKIP_INITDB set; skipping initdb"
   fi
-
-  echo "$configure_options"
 }
 
-load_configure_options() {
-  local asdf_postgres_configure_options="${HOME}/.asdf-postgres-configure-options"
-
-  if [[ ! -r "$asdf_postgres_configure_options" ]]; then
-    return
-  fi
-
-  set -a
-  source "$asdf_postgres_configure_options"
-  set +a
-}
-
-lib_include_paths() {
-  if [ -d "$HOMEBREW_PREFIX/opt" ]; then
-    local homebrew_lib_path
-    local homebrew_include_path
-    homebrew_lib_path="$HOMEBREW_PREFIX/opt/openssl/lib"
-    homebrew_include_path="$HOMEBREW_PREFIX/opt/openssl/include:/opt/homebrew/include"
-
-    while read -r dir; do
-      homebrew_lib_path="$homebrew_lib_path:$dir/lib"
-      homebrew_include_path="$homebrew_include_path:$dir/include"
-    done <<<"$(ls -d $HOMEBREW_PREFIX/opt/openssl@* | sort -rV)"
-
-    homebrew_lib_path="$homebrew_lib_path:$HOMEBREW_PREFIX/openssl/lib:$HOMEBREW_PREFIX/libressl/lib:$HOMEBREW_PREFIX/lib:"
-    homebrew_include_path="$homebrew_include_path:$HOMEBREW_PREFIX/openssl/include:$HOMEBREW_PREFIX/libressl/include:$HOMEBREW_PREFIX/include:"
-  fi
-  echo "--with-libraries='/opt/local/lib:/sw/lib:/usr/local/opt/openssl/lib:$homebrew_lib_path/usr/local/lib:/usr/lib' \
-    --with-includes='/opt/local/lib:/sw/lib:/usr/local/opt/openssl/include:$homebrew_include_path/usr/local/include:/usr/local/lib:/usr/lib'"
-}
-
-install_postgres "$ASDF_INSTALL_TYPE" "$ASDF_INSTALL_VERSION" "$ASDF_INSTALL_PATH"
+install_prebuilt "${ASDF_INSTALL_TYPE:-version}" "${ASDF_INSTALL_VERSION:-}" "${ASDF_INSTALL_PATH:?ASDF_INSTALL_PATH not set}"
